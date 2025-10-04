@@ -61,12 +61,17 @@ jobs:
           jq ".version = \"$NEW_VERSION\"" package.json > package.tmp.json && mv package.tmp.json package.json
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      # 6️⃣ Cria branch release a partir da develop completa
+      # 6️⃣ Atualiza a develop com o bump de versão
+      - name: Commit version bump to develop
+        run: |
+          git add package.json
+          git commit -m "Bump version to ${{ steps.version.outputs.version }}"
+          git push origin develop
+
+      # 7️⃣ Cria branch release a partir da develop atualizada
       - name: Create release branch
         run: |
           git checkout -b release/${{ steps.version.outputs.version }}
-          git add package.json
-          git commit -m "Bump version to ${{ steps.version.outputs.version }}"
           git push --set-upstream origin release/${{ steps.version.outputs.version }}
 
       # 7️⃣ Cria Pull Request para main

@@ -43,7 +43,7 @@ jobs:
 
       # 4️⃣ Sai do job se não houver mudanças
       - name: Abort if no changes
-        if: ${{ steps.check_changes.outputs.skip_release == 'true' }}
+        if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' }}
         run: |
           echo "No new changes in develop. Exiting..."
           exit 0

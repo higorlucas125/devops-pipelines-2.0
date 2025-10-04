@@ -2,7 +2,7 @@ name: Release from Develop 1.0
 
 on:
   workflow_run:
-    workflows: ["Test Workflow"]  # nome do workflow de testes
+    workflows: ["Test Workflow"]   # workflow de testes que roda na develop
     types:
       - completed
 
@@ -12,15 +12,17 @@ permissions:
 
 jobs:
   release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' }} # só roda se workflow de testes passou
+    # Só roda se workflow de testes passou e o commit é da develop
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' }}
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout develop
+      # 1️⃣ Checkout develop completo
       - name: Checkout develop
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: develop
 
       # 2️⃣ Configura Git
       - name: Setup Git
@@ -28,7 +30,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # 3️⃣ Verifica se develop tem alterações em relação à main
+      # 3️⃣ Verifica se há alterações em relação à main
       - name: Check if develop has changes
         id: check_changes
         run: |
@@ -39,11 +41,10 @@ jobs:
           else
             echo "skip_release=false" >> $GITHUB_OUTPUT
             echo "Changes detected in develop."
-          fi
 
       # 4️⃣ Sai do job se não houver mudanças
       - name: Abort if no changes
-        if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' }}
+        if: ${{ steps.check_changes.outputs.skip_release == 'true' }}
         run: |
           echo "No new changes in develop. Exiting..."
           exit 0
@@ -53,17 +54,13 @@ jobs:
         id: version
         run: |
           CURRENT=$(jq -r '.version' package.json)
-          echo "Versão atual: $CURRENT"
-
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
           PATCH=$((PATCH + 1))
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-          echo "Nova versão: $NEW_VERSION"
-
           jq ".version = \"$NEW_VERSION\"" package.json > package.tmp.json && mv package.tmp.json package.json
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      # 6️⃣ Cria branch release a partir da develop
+      # 6️⃣ Cria branch release a partir da develop completa
       - name: Create release branch
         run: |
           git checkout -b release/${{ steps.version.outputs.version }}
@@ -80,7 +77,6 @@ jobs:
             const version = `release/${{ steps.version.outputs.version }}`;
             const base = 'main';
             const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
-
             const { data: pulls } = await github.rest.pulls.list({
               owner,
               repo,
@@ -88,7 +84,6 @@ jobs:
               base,
               head: `${owner}:${version}`
             });
-
             if (pulls.length > 0) {
               core.info(`Já existe um PR aberto: ${pulls[0].html_url}`);
             } else {

@@ -1,0 +1,104 @@
+name: Release from Develop 1.0
+
+on:
+  workflow_run:
+    workflows: ["Test Workflow"]  # nome do workflow de testes
+    types:
+      - completed
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} # só roda se workflow de testes passou
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout develop
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2️⃣ Configura Git
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 3️⃣ Verifica se develop tem alterações em relação à main
+      - name: Check if develop has changes
+        id: check_changes
+        run: |
+          git fetch origin main
+          if git diff --quiet origin/main...HEAD; then
+            echo "skip_release=true" >> $GITHUB_OUTPUT
+            echo "No changes in develop. Skipping release."
+          else
+            echo "skip_release=false" >> $GITHUB_OUTPUT
+            echo "Changes detected in develop."
+
+      # 4️⃣ Sai do job se não houver mudanças
+      - name: Abort if no changes
+        if: ${{ steps.check_changes.outputs.skip_release == 'true' }}
+        run: |
+          echo "No new changes in develop. Exiting..."
+          exit 0
+
+      # 5️⃣ Gera próximo número de release no package.json
+      - name: Generate next release version
+        id: version
+        run: |
+          CURRENT=$(jq -r '.version' package.json)
+          echo "Versão atual: $CURRENT"
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "Nova versão: $NEW_VERSION"
+
+          jq ".version = \"$NEW_VERSION\"" package.json > package.tmp.json && mv package.tmp.json package.json
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      # 6️⃣ Cria branch release a partir da develop
+      - name: Create release branch
+        run: |
+          git checkout -b release/${{ steps.version.outputs.version }}
+          git add package.json
+          git commit -m "Bump version to ${{ steps.version.outputs.version }}"
+          git push --set-upstream origin release/${{ steps.version.outputs.version }}
+
+      # 7️⃣ Cria Pull Request para main
+      - name: Create Pull Request via GitHub Script
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const version = `release/${{ steps.version.outputs.version }}`;
+            const base = 'main';
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+
+            const { data: pulls } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              base,
+              head: `${owner}:${version}`
+            });
+
+            if (pulls.length > 0) {
+              core.info(`Já existe um PR aberto: ${pulls[0].html_url}`);
+            } else {
+              const { data: pr } = await github.rest.pulls.create({
+                owner,
+                repo,
+                title: `Release ${version.replace('release/', '')}`,
+                head: version,
+                base: base,
+                body: `🚀 Nova release criada automaticamente a partir da branch **develop**.\n\n- Versão: ${version.replace('release/', '')}\n- Data: ${new Date().toISOString()}\n\n> Revise e aprove este PR para integrar as mudanças da \`develop\` na \`main\`.`,
+                draft: false
+              });
+              core.info(`PR criado: ${pr.html_url}`);
+            }

@@ -39,6 +39,7 @@ jobs:
           else
             echo "skip_release=false" >> $GITHUB_OUTPUT
             echo "Changes detected in develop."
+          fi
 
       # 4️⃣ Sai do job se não houver mudanças
       - name: Abort if no changes
